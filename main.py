@@ -1,12 +1,19 @@
 import os
 import random
 from PIL import Image
+import cv2
 import numpy as np
+from natsort import os_sorted
 from enum import Enum
 
+# folders to choose tile sets from, output generated images and to store frames
 TILES_FOLDER = "TileSets"
+GENERATED_IMAGES = "GeneratedImages"
+FRAMES = "Frames"
+GENERATED_ANIMATIONS = "GeneratedAnimations"
 
 
+# enum for directions
 class Dir(Enum):
     TOP = 1
     RIGHT = 2
@@ -14,6 +21,7 @@ class Dir(Enum):
     LEFT = 4
 
 
+# enum for tile sides
 class Sides(str, Enum):
     TOP = "top"
     RIGHT = "right"
@@ -22,7 +30,7 @@ class Sides(str, Enum):
 
 
 def chose_tile_set():
-    all_tile_sets = os.listdir(TILES_FOLDER)
+    all_tile_sets = os_sorted(os.listdir(TILES_FOLDER))
     if not all_tile_sets:
         raise OSError("No tile sets to choose")
     print("Choose tile set:")
@@ -39,12 +47,11 @@ def chose_tile_set():
         except IndexError:
             print("Invalid choice")
 
-    all_tiles = np.array(Image.open(os.path.join(TILES_FOLDER, tile_set)))
+    all_tiles = np.array(Image.open(os.path.join(TILES_FOLDER, tile_set)).convert("RGB"))
     return all_tiles
 
 
 def make_choice(question: str, answers: list) -> str:
-    element = None
     print(question)
     for i, answer in enumerate(answers):
         print(f"{i + 1}: {answer}")
@@ -88,7 +95,6 @@ class Tile:
         self.bottom = self.get_side(Dir.BOTTOM)
         self.left = self.get_side(Dir.LEFT)
         self.weight = 1
-        self.possible = True
 
     def get_side(self, direction) -> int:
         side_hash = None
@@ -132,7 +138,7 @@ class TileSet:
         return "{}".format('\n'.join([str(tile.tile) for tile in self.tiles]))
 
 
-def all_possible_tiles(tiles, rotate: bool, mirror: bool):
+def all_possible_tiles(tiles, rotate: bool, mirror: bool) -> TileSet:
     tile_set = TileSet()
     if not rotate and not mirror:  # nothing
         for tile in tiles:
@@ -160,16 +166,27 @@ def all_possible_tiles(tiles, rotate: bool, mirror: bool):
 
 
 class Grid:
-    def __init__(self, tile_set: TileSet, use_weights: bool, width: int, height: int):
+    def __init__(self, tile_set: TileSet, use_weights: bool, tile_size: int, width: int, height: int, animate: bool):
         self.tile_set = tile_set
         self.grid = [[i for i in range(len(tile_set.tiles))] for _ in range(width * height)]
         self.use_weights = use_weights
+        self.tile_size = (tile_size, tile_size)
         self.width = width
         self.height = height
+        self.animate = animate
         self.stack = []
+        self.frame = 0
+
+        if self.use_weights:
+            self.clear_frames()
+
+    @staticmethod
+    def clear_frames():
+        for frame in os.listdir(FRAMES):
+            os.remove(os.path.join(FRAMES, frame))
 
     # find if wfc is collapsed
-    def is_collapsed(self):
+    def is_collapsed(self) -> bool:
         for cell in self.grid:
             # check if any grid cell has more than one possible tile
             if len(cell) > 1:
@@ -177,7 +194,7 @@ class Grid:
         return True
 
     # choose random position out of cells with min entropy
-    def min_entropy_pos(self):
+    def min_entropy_pos(self) -> int:
         # list of possible positions
         pos_list = []
         # current min entropy
@@ -189,7 +206,7 @@ class Grid:
                 pos_list.clear()
                 pos_list.append(i)
                 min_entropy = entropy
-            # if cell has the same entropy as current min entropy is
+            # if cell has the same entropy as current min entropy
             elif entropy == min_entropy:
                 pos_list.append(i)
         # return random pos of cell with min entropy
@@ -235,7 +252,6 @@ class Grid:
     def constraint(self, cur_pos: int, direction: Dir, neighbour_pos: int) -> bool:
         cur_side = ""
         neighbour_side = ""
-        side = None
         # create lists with available sides of cell at current position and it's neighbour in relation to one another
         match direction:
             case Dir.TOP:
@@ -254,13 +270,13 @@ class Grid:
         cur_pos_sides = [getattr(self.tile_set.tiles[tile_pos], cur_side) for tile_pos in self.grid[cur_pos]]
         neighbour_pos_sides = [getattr(self.tile_set.tiles[tile_pos], neighbour_side) for tile_pos in self.grid[neighbour_pos]]
         matched_sides = set(cur_side for cur_side in cur_pos_sides if cur_side in neighbour_pos_sides)
-        # print(f"{cur_pos_sides=}\n{neighbour_pos_sides=}\n{matched_sides=}\n{self.grid[neighbour_pos]=}")
+
         new_neighbour_tiles_pos = []
 
         for tile_pos in self.grid[neighbour_pos]:
             if getattr(self.tile_set.tiles[tile_pos], neighbour_side) in matched_sides:
                 new_neighbour_tiles_pos.append(tile_pos)
-        # print(f"{new_neighbour_tiles_pos=}", end="\n\n")
+
         if self.grid[neighbour_pos] != new_neighbour_tiles_pos:
             self.grid[neighbour_pos] = new_neighbour_tiles_pos
             return True
@@ -271,11 +287,9 @@ class Grid:
         self.stack.append(pos)
         # while stack is not empty
         while self.stack:
-            # print(self.stack)
             # pop position from stack
             cur_pos = self.stack.pop()
             # for direction and position in every valid neighbour
-            # print(self.valid_neighbours(cur_pos))
             for d, neighbour_pos in self.valid_neighbours(cur_pos):
                 # constraint neighbour
                 changed = self.constraint(cur_pos, d, neighbour_pos)
@@ -288,33 +302,137 @@ class Grid:
         self.collapse_at(pos)
         self.propagate(pos)
 
-    def run(self):
+    def is_valid(self) -> bool:
+        # iterate over the whole grid
+        for i in range(self.height):
+            for j in range(self.width):
+                # if there are no possible tiles for cell
+                if not self.grid[i * self.width + j]:
+                    return False
+        return True
+
+    # find max integer in in all files names in a folder, ex: 0.png, 1.png, 2.png -> 2
+    @staticmethod
+    def chose_max_index(folder: str, lstrip: str) -> int:
+        max_index = 0
+        # list all files in a folder
+        for im in os.listdir(folder):
+            try:
+                # convert number in file name to integer removing part before and after it
+                current = int(im.lstrip(lstrip).split(".")[0])
+                if current > max_index:
+                    max_index = current
+            except ValueError:
+                pass
+        return max_index
+
+    def make_animation(self) -> None:
+        max_index = self.chose_max_index(GENERATED_ANIMATIONS, "animation_")
+        # set fourcc for video
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        filename = f"{GENERATED_ANIMATIONS}/animation_{max_index + 1}.mp4"
+        # set up animation
+        animation = cv2.VideoWriter(
+            filename=filename,
+            apiPreference=0,
+            fourcc=fourcc,
+            fps=100,
+            frameSize=(self.tile_size[0] * self.width, self.tile_size[1] * self.height)
+        )
+        # add every frame to the animation
+        for frame in os_sorted(os.listdir(FRAMES)):
+            animation.write(np.array(Image.open(os.path.join(FRAMES, frame))))
+        animation.release()
+        print(f"Animation is saved as {filename}")
+
+    def progress_bar(self, title, bar_length=20):
+        total = self.width * self.height
+        current = 0
+        for cell in self.grid:
+            if len(cell) == 1:
+                current += 1
+        fraction = current / total
+        progress = int(fraction * bar_length) * '█'
+        padding = int(bar_length - len(progress)) * '░'
+        ending = "\n" if current == total else "\r"
+        print(f"{title} [{progress}{padding}] {round(fraction * 100, 2)}%", end=ending)
+
+    def run(self) -> bool:
         while not self.is_collapsed():
             self.iterate()
+            if self.is_valid():
+                if self.animate:
+                    self.progress_bar("Generating frames:")
+                    self.graphics(final=False)
+                else:
+                    self.progress_bar("Generating image:")
+            else:
+                return False
+        self.graphics()
+        if self.animate:
+            self.make_animation()
+        return True
 
-    def graphics(self):
+    def graphics(self, final=True) -> None:
+        # variable to store image
         image = []
+        # iterate over the whole grid
         for i in range(self.height):
+            # variable to store row of tiles
             tiles_row = []
             for j in range(self.width):
-                tiles_row.append(self.tile_set.tiles[self.grid[i * self.width + j][0]].tile)  # need to check here
+                # get grid cell at given index
+                cell = self.grid[i * self.width + j]
+                # if there is only one possible tile that can be placed in the cell
+                if len(cell) == 1:
+                    # get tile from tile set and append it to the row
+                    tiles_row.append(self.tile_set.tiles[self.grid[i * self.width + j][0]].tile)
+                else:
+                    # if there is more than one possible tiles for the cell
+                    avg_colors = []
+                    for tile_pos in cell:
+                        # calculate average color for every cell
+                        avg_colors.append(self.tile_set.tiles[tile_pos].tile.mean(0).mean(0))
+                    # calculate average color among all cells converting it to int
+                    avg_color = tuple(np.array(avg_colors).mean(0).astype(int))
+                    # generate tile of average color and append it to the row
+                    tiles_row.append(Image.new("RGB", self.tile_size, avg_color))
+            # concatenate tiles vertically and append to image as a row of tiles
             image.append(np.concatenate(tiles_row, axis=1))
+        # concatenate all rows in image horizontally
         image = np.concatenate(image, axis=0)
-        Image.fromarray(image).save(f"result.png")
+
+        # if this is not a final image (just a frame)
+        if not final:
+            # save it to the frames folder
+            Image.fromarray(image).save(f"{FRAMES}/frame_{self.frame}.png")
+            # increase frames counter
+            self.frame += 1
+        else:
+            # if this is a final image (completely generated)
+            max_index = self.chose_max_index(GENERATED_IMAGES, "result_")
+            # save generated image with new max integer in name
+            filename = f"{GENERATED_IMAGES}/result_{max_index + 1}.png"
+            Image.fromarray(image).save(filename)
+            print(f"Generated image is saved as {filename}")
 
 
 def main():
+    tile_size = 7
+    width, height = (10, 10)
+    animate = True
     all_tiles = chose_tile_set()
     operation_choice = make_choice("Как прожарим мяско Сережи:", ["Жесткая разбивка", "Не жесткая разбивка"])
     if operation_choice == "Жесткая разбивка":
         tiles = pars_all_possible_tiles(all_tiles, 3)
     else:
-        tiles = pars_strict_tiles(all_tiles, 8)
-    tile_set = all_possible_tiles(tiles, rotate=False, mirror=True)
-    print(Tile.sides_dict)
-    wfc = Grid(tile_set, True, 20, 20)
-    wfc.run()
-    wfc.graphics()
+        tiles = pars_strict_tiles(all_tiles, tile_size)
+    tile_set = all_possible_tiles(tiles, rotate=True, mirror=True)
+    wfc = Grid(tile_set, True, tile_size, width, height, animate)
+    if wfc.run():
+        print("WFC finished successfully")
+    else:
+        print("Couldn't generate an image from a given tile set")
 
 
 if __name__ == '__main__':
