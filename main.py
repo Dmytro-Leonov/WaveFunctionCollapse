@@ -6,11 +6,11 @@ import numpy as np
 from natsort import os_sorted
 from enum import Enum
 
-# folders to choose tile sets from, output generated images and to store frames
+# folders to choose tile sets from, store generated images, generated animations and frames
 TILES_FOLDER = "TileSets"
 GENERATED_IMAGES = "GeneratedImages"
-FRAMES = "Frames"
 GENERATED_ANIMATIONS = "GeneratedAnimations"
+FRAMES = "Frames"
 
 
 # enum for directions
@@ -69,17 +69,18 @@ def make_choice(question: str, answers: list) -> str:
 
 
 def pars_all_possible_tiles(tile_set, tile_size_px):
-    # tiles = []
-    # for tile_offset in range(tile_size_px, len(tile_set[0]), tile_size_px):
-    #     tile = np.vstack([tile_set[:, tile_offset - tile_size_px:tile_offset]])
-    #     tiles.append(tile)
-    return
+    tiles = []
+    for y_offset in range(tile_size_px, tile_set.shape[1] + 1, tile_size_px):
+        for x_offset in range(tile_size_px, tile_set.shape[0] + 1, tile_size_px):
+            tile = tile_set[y_offset - tile_size_px: y_offset, x_offset - tile_size_px: x_offset]
+            tiles.append(tile)
+    return tiles
 
 
 def pars_strict_tiles(tile_set, tile_size_px):
     tiles = []
     for tile_offset in range(tile_size_px, tile_set.shape[1] + 1, tile_size_px):
-        tile = np.vstack([tile_set[:, tile_offset - tile_size_px:tile_offset]])
+        tile = tile_set[:, tile_offset - tile_size_px:tile_offset]
         tiles.append(tile)
     return tiles
 
@@ -94,6 +95,7 @@ class Tile:
         self.right = self.get_side(Dir.RIGHT)
         self.bottom = self.get_side(Dir.BOTTOM)
         self.left = self.get_side(Dir.LEFT)
+        self.avg_color = []
         self.weight = 1
 
     def get_side(self, direction) -> int:
@@ -123,19 +125,13 @@ class TileSet:
     def __init__(self, ):
         self.tiles = []
 
-    def add(self, tile):
+    def add(self, tile: Tile):
         for tile_in_set in self.tiles:
             if np.array_equal(tile_in_set.tile, tile.tile):
                 tile_in_set.weight += 1
                 return
+        tile.avg_color = tile.tile.mean(0).mean(0)
         self.tiles.append(tile)
-
-    def save(self):
-        for i, tile in enumerate(self.tiles):
-            Image.fromarray(tile.tile).save(f"tile{i}.png")
-
-    def __str__(self):
-        return "{}".format('\n'.join([str(tile.tile) for tile in self.tiles]))
 
 
 def all_possible_tiles(tiles, rotate: bool, mirror: bool) -> TileSet:
@@ -177,21 +173,13 @@ class Grid:
         self.stack = []
         self.frame = 0
 
-        if self.use_weights:
+        if self.animate:
             self.clear_frames()
 
     @staticmethod
     def clear_frames():
         for frame in os.listdir(FRAMES):
             os.remove(os.path.join(FRAMES, frame))
-
-    # find if wfc is collapsed
-    def is_collapsed(self) -> bool:
-        for cell in self.grid:
-            # check if any grid cell has more than one possible tile
-            if len(cell) > 1:
-                return False
-        return True
 
     # choose random position out of cells with min entropy
     def min_entropy_pos(self) -> int:
@@ -268,7 +256,8 @@ class Grid:
                 neighbour_side = Sides.RIGHT
 
         cur_pos_sides = [getattr(self.tile_set.tiles[tile_pos], cur_side) for tile_pos in self.grid[cur_pos]]
-        neighbour_pos_sides = [getattr(self.tile_set.tiles[tile_pos], neighbour_side) for tile_pos in self.grid[neighbour_pos]]
+        neighbour_pos_sides = [getattr(self.tile_set.tiles[tile_pos], neighbour_side) for tile_pos in
+                               self.grid[neighbour_pos]]
         matched_sides = set(cur_side for cur_side in cur_pos_sides if cur_side in neighbour_pos_sides)
 
         new_neighbour_tiles_pos = []
@@ -302,15 +291,6 @@ class Grid:
         self.collapse_at(pos)
         self.propagate(pos)
 
-    def is_valid(self) -> bool:
-        # iterate over the whole grid
-        for i in range(self.height):
-            for j in range(self.width):
-                # if there are no possible tiles for cell
-                if not self.grid[i * self.width + j]:
-                    return False
-        return True
-
     # find max integer in in all files names in a folder, ex: 0.png, 1.png, 2.png -> 2
     @staticmethod
     def chose_max_index(folder: str, lstrip: str) -> int:
@@ -330,6 +310,7 @@ class Grid:
         max_index = self.chose_max_index(GENERATED_ANIMATIONS, "animation_")
         # set fourcc for video
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        # make output file name
         filename = f"{GENERATED_ANIMATIONS}/animation_{max_index + 1}.mp4"
         # set up animation
         animation = cv2.VideoWriter(
@@ -341,7 +322,7 @@ class Grid:
         )
         # add every frame to the animation
         for frame in os_sorted(os.listdir(FRAMES)):
-            animation.write(np.array(Image.open(os.path.join(FRAMES, frame))))
+            animation.write(np.array(cv2.imread(os.path.join(FRAMES, frame))))
         animation.release()
         print(f"Animation is saved as {filename}")
 
@@ -352,26 +333,65 @@ class Grid:
             if len(cell) == 1:
                 current += 1
         fraction = current / total
-        progress = int(fraction * bar_length) * '█'
-        padding = int(bar_length - len(progress)) * '░'
+        progress = int(fraction * bar_length) * "█"
+        padding = int(bar_length - len(progress)) * "░"
         ending = "\n" if current == total else "\r"
-        print(f"{title} [{progress}{padding}] {round(fraction * 100, 2)}%", end=ending)
+        print(f"{title} [{progress}{padding}] {fraction * 100:.2f}%", end=ending)
+
+    # find if wfc is collapsed and there are no cells with zero entropy
+    def is_collapsed(self) -> (bool, bool):
+        is_collapsed = True
+        is_valid = True
+        for cell in self.grid:
+            # calculate number of possible tiles for the cell
+            possible_tiles = len(cell)
+            # if any grid cell has more than one or zero possible tiles
+            if possible_tiles > 1 and is_collapsed:
+                is_collapsed = False
+            # if there are no possible tiles for cell
+            elif not possible_tiles and is_valid:
+                is_valid = False
+        return is_collapsed, is_valid
+
+    def is_valid(self) -> bool:
+        # iterate over the whole grid
+        for i in range(self.height):
+            for j in range(self.width):
+                # if there are no possible tiles for cell
+                if not self.grid[i * self.width + j]:
+                    return False
+        return True
 
     def run(self) -> bool:
-        while not self.is_collapsed():
-            self.iterate()
-            if self.is_valid():
-                if self.animate:
-                    self.progress_bar("Generating frames:")
-                    self.graphics(final=False)
-                else:
-                    self.progress_bar("Generating image:")
-            else:
+        while True:
+            is_collapsed, is_valid = self.is_collapsed()
+
+            if not is_valid:
                 return False
+            if is_collapsed:
+                break
+
+            self.iterate()
+
+            if self.animate:
+                self.progress_bar("Generating frames:")
+                self.graphics(final=False)
+            else:
+                self.progress_bar("Generating image:")
+
         self.graphics()
         if self.animate:
             self.make_animation()
         return True
+
+    # calculate average color for a given cell
+    def calculate_avg_color(self, cell: list[int]) -> tuple[np.array]:
+        avg_colors = []
+        for tile_pos in cell:
+            # calculate average color for every tile in the cell
+            avg_colors.append(self.tile_set.tiles[tile_pos].avg_color)
+        # calculate average color among all average colors of tiles converting it to int
+        return tuple(np.array(avg_colors).mean(0).astype(int))
 
     def graphics(self, final=True) -> None:
         # variable to store image
@@ -389,14 +409,8 @@ class Grid:
                     tiles_row.append(self.tile_set.tiles[self.grid[i * self.width + j][0]].tile)
                 else:
                     # if there is more than one possible tiles for the cell
-                    avg_colors = []
-                    for tile_pos in cell:
-                        # calculate average color for every cell
-                        avg_colors.append(self.tile_set.tiles[tile_pos].tile.mean(0).mean(0))
-                    # calculate average color among all cells converting it to int
-                    avg_color = tuple(np.array(avg_colors).mean(0).astype(int))
-                    # generate tile of average color and append it to the row
-                    tiles_row.append(Image.new("RGB", self.tile_size, avg_color))
+                    # generate tile of average color out of all possible tiles of cell and append it to the row
+                    tiles_row.append(Image.new("RGB", self.tile_size, self.calculate_avg_color(cell)))
             # concatenate tiles vertically and append to image as a row of tiles
             image.append(np.concatenate(tiles_row, axis=1))
         # concatenate all rows in image horizontally
@@ -418,22 +432,23 @@ class Grid:
 
 
 def main():
-    tile_size = 7
+    tile_size = 32
     width, height = (10, 10)
     animate = True
     all_tiles = chose_tile_set()
     operation_choice = make_choice("Как прожарим мяско Сережи:", ["Жесткая разбивка", "Не жесткая разбивка"])
     if operation_choice == "Жесткая разбивка":
-        tiles = pars_all_possible_tiles(all_tiles, 3)
+        tiles = pars_all_possible_tiles(all_tiles, tile_size)
     else:
         tiles = pars_strict_tiles(all_tiles, tile_size)
-    tile_set = all_possible_tiles(tiles, rotate=True, mirror=True)
+    tile_set = all_possible_tiles(tiles, rotate=False, mirror=False)
     wfc = Grid(tile_set, True, tile_size, width, height, animate)
     if wfc.run():
         print("WFC finished successfully")
     else:
-        print("Couldn't generate an image from a given tile set")
+        print("\nCouldn't generate an image from a given tile set")
 
-
+# before improvement 3.654643690001103
+# after improvement 1.9025049199990463
 if __name__ == '__main__':
     main()
