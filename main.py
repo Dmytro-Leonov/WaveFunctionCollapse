@@ -31,7 +31,13 @@ class Dir(Enum):
     LEFT = 4
 
 
-def chose_tile_set():
+def chose_tile_set() -> np.array:
+    """
+    Lists all tile sets in a folder and waits for user to choose one.
+    If input or choice is invalid, user will see corresponding Error and will be prompted to enter new choice.
+    If choice is valid, corresponding tile set opens with PIL, converts to RGB format and than to numpy array.
+    Function returns opened tile set.
+    """
     all_tile_sets = os_sorted(os.listdir(TILE_SETS_FOLDER))
     if not all_tile_sets:
         raise OSError("No tile sets to choose")
@@ -48,21 +54,29 @@ def chose_tile_set():
             print("Invalid input")
         except IndexError:
             print("Invalid choice")
-
     tile_set = np.array(Image.open(os.path.join(TILE_SETS_FOLDER, tile_set_name)).convert("RGB"))
     return tile_set
 
 
 def pars_tiles(tile_set: np.array, tile_size_px: int) -> list[np.array]:
+    """
+    Parses tiles from a given tile set
+    """
+    # get height and width of tile set
     height, width = tile_set.shape[:2]
+    # validate tile size (width and height should be divisible by it)
     if width % tile_size_px or height % tile_size_px:
         raise ValueError(
             f"Invalid tile size ({tile_size_px}) for tile set of given dimensions (width = {width}, height = {height})"
         )
+    # list to store all parsed tiles
     tiles = []
+    # iterate over tile set with offset of tile size
     for y_offset in range(tile_size_px, height + 1, tile_size_px):
         for x_offset in range(tile_size_px, width + 1, tile_size_px):
+            # slice tile from tile set
             tile = tile_set[y_offset - tile_size_px: y_offset, x_offset - tile_size_px: x_offset]
+            # append tile to tiles list
             tiles.append(tile)
     return tiles
 
@@ -115,8 +129,10 @@ class TileSet:
     def __init__(self):
         self.tiles = []
 
-    # adds tile to the tile set
     def add(self, tile: Tile):
+        """
+        Adds tile to the tile set
+        """
         for tile_in_set in self.tiles:
             # if tile already exists in the tile set
             if np.array_equal(tile_in_set.tile, tile.tile):
@@ -129,7 +145,10 @@ class TileSet:
         self.tiles.append(tile)
 
 
-def all_possible_tiles(tiles, rotate: bool, mirror: bool) -> TileSet:
+def all_possible_tiles(tiles: list, rotate: bool, mirror: bool) -> TileSet:
+    """
+    Rotates and mirrors every tile depending on chosen modes.
+    """
     tile_set = TileSet()
     if not rotate and not mirror:  # nothing
         # add every tile to tile set
@@ -185,11 +204,16 @@ class WFC:
 
     @staticmethod
     def clear_frames():
+        """
+        Clears folder with frames
+        """
         for frame in os.listdir(FRAMES):
             os.remove(os.path.join(FRAMES, frame))
 
-    # choose random position out of cells with min entropy
     def min_entropy_pos(self) -> int:
+        """
+        Returns random position out of cells with min entropy
+        """
         # list of possible positions
         pos_list = []
         # current min entropy
@@ -207,8 +231,10 @@ class WFC:
         # return random pos of cell with min entropy
         return random.choice(pos_list)
 
-    # collapse at given pos
     def collapse_at(self, pos: int):
+        """
+        Takes cell position and leaves only one randomly chosen tile in it
+        """
         if self.use_weights:
             # if weights are used, calculate their sum to later normalize them
             total_weights = sum([self.tile_set.tiles[tile_pos].weight for tile_pos in self.grid[pos]])
@@ -225,6 +251,10 @@ class WFC:
         self.grid[pos] = [chosen_tile]
 
     def valid_neighbours(self, pos: int) -> list[tuple[Dir, int]]:
+        """
+        Takes position of cell and return list of tuples of direction and position of a valid neighbour cell.
+        For example, if current position is '0', then valid neighbours are to the bottom and to the right.
+        """
         positions = []
         # if it is not on top
         if pos - self.width >= 0:
@@ -245,43 +275,52 @@ class WFC:
         return positions
 
     def constraint(self, cur_pos: int, direction: Dir, neighbour_pos: int) -> bool:
-        # cur_side = ""
-        # neighbour_side = ""
+        """
+        Removes positions of tiles that can't be matched with tiles in current cell from the neighbour cell
+        in given direction.
+        Returns True if the neighbour cell was changed and False otherwise.
+        """
         new_neighbour_tiles_pos = []
-        # create lists with available sides of cell at current position and it's neighbour in relation to one another
         match direction:
             case Dir.TOP:
-                # create list of sides in given direction ("top", "right", "bottom" or "left" side) for current cell
+                # create list of sides in given direction for tiles in current cell
                 cur_pos_sides = [self.tile_set.tiles[tile_pos].top for tile_pos in self.grid[cur_pos]]
-
+                # iterate over positions of tiles in neighbour cell
                 for tile_pos in self.grid[neighbour_pos]:
+                    # if opposite side to given direction of tile matches side in created list of side
                     if self.tile_set.tiles[tile_pos].bottom in cur_pos_sides:
+                        # than it can be placed there and it position in the tile set appends to the list
                         new_neighbour_tiles_pos.append(tile_pos)
+            # same code for the other three sides
             case Dir.RIGHT:
                 cur_pos_sides = [self.tile_set.tiles[tile_pos].right for tile_pos in self.grid[cur_pos]]
-
                 for tile_pos in self.grid[neighbour_pos]:
                     if self.tile_set.tiles[tile_pos].left in cur_pos_sides:
                         new_neighbour_tiles_pos.append(tile_pos)
             case Dir.BOTTOM:
                 cur_pos_sides = [self.tile_set.tiles[tile_pos].bottom for tile_pos in self.grid[cur_pos]]
-
                 for tile_pos in self.grid[neighbour_pos]:
                     if self.tile_set.tiles[tile_pos].top in cur_pos_sides:
                         new_neighbour_tiles_pos.append(tile_pos)
             case Dir.LEFT:
                 cur_pos_sides = [self.tile_set.tiles[tile_pos].left for tile_pos in self.grid[cur_pos]]
-
                 for tile_pos in self.grid[neighbour_pos]:
                     if self.tile_set.tiles[tile_pos].right in cur_pos_sides:
                         new_neighbour_tiles_pos.append(tile_pos)
 
+        # if there are changes to the neighbour cell
         if self.grid[neighbour_pos] != new_neighbour_tiles_pos:
+            # replace tile positions with the new ones
             self.grid[neighbour_pos] = new_neighbour_tiles_pos
             return True
+        # if there are no changes
         return False
 
     def propagate(self, pos: int) -> None:
+        """
+        Takes position of the cell that was collapsed and constraints neighbours until in every cell there are left
+        only positions of tiles that can be matched together.
+        """
         # append position to stack
         self.stack.append(pos)
         # while stack is not empty
@@ -290,20 +329,29 @@ class WFC:
             cur_pos = self.stack.pop()
             # for direction and position in every valid neighbour
             for d, neighbour_pos in self.valid_neighbours(cur_pos):
-                # constraint neighbour
+                # constraint neighbour cell
                 changed = self.constraint(cur_pos, d, neighbour_pos)
                 # append it's position to stack if it's not already there
+                # and the cell has changed in constraint() method
                 if neighbour_pos not in self.stack and changed:
                     self.stack.append(neighbour_pos)
 
     def iterate(self) -> None:
+        """
+        One iteration of algorithm
+        """
         pos = self.min_entropy_pos()
         self.collapse_at(pos)
         self.propagate(pos)
 
-    # find max integer in in all files names in a folder, ex: 0.png, 1.png, 2.png -> 2
     @staticmethod
     def chose_max_index(folder: str, lstrip: str) -> int:
+        """
+        Takes folder name and part to strip from left side to leave only and integer.
+
+        Finds max integer in in all files names in a given folder.
+        For example, result_0.png, result_1.png, result_2.png -> 2
+        """
         max_index = 0
         # list all files in a folder
         for im in os.listdir(folder):
@@ -316,8 +364,12 @@ class WFC:
                 pass
         return max_index
 
-    def make_animation(self) -> None:
+    def generate_animation(self) -> None:
+        """
+        Generates animation from frames i folder using cv2
+        """
         print("Generating animation...")
+        # calculate max index in animations names in folder
         max_index = self.chose_max_index(GENERATED_ANIMATIONS, "animation_")
         # set fourcc for video
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -337,7 +389,10 @@ class WFC:
         animation.release()
         print(f"Animation is saved as {filename}")
 
-    def progress_bar(self, title: str, current: int, bar_length=20):
+    def progress_bar(self, title: str, current: int, bar_length=20) -> None:
+        """
+        Prints progress bar for a WFC
+        """
         total = self.width * self.height
         fraction = current / total
         progress = int(fraction * bar_length) * "█"
@@ -345,8 +400,15 @@ class WFC:
         ending = "\n" if current == total else "\r"
         print(f"{title} [{progress}{padding}] {fraction * 100:.2f}%", end=ending)
 
-    # find if wfc is collapsed and there are no cells with zero entropy
     def is_collapsed(self) -> (bool, bool, int):
+        """
+        Calculates and returns in tuple:
+            Whether WFC is collapsed (every cell has only one possible tile)
+
+            Whether WFC is valid (there are no cells with zero entropy)
+
+            How many cells are currently calculated
+        """
         is_collapsed = True
         is_valid = True
         currently_done = 0
@@ -365,15 +427,22 @@ class WFC:
         return is_collapsed, is_valid, currently_done
 
     def run(self) -> bool:
+        """
+        Runs WFC algorithm.
+
+        Returns True if algorithm finishes successfully or False otherwise
+        """
         # clear previously generated frames
         if self.animate:
             self.clear_frames()
+        # main algorithm loop
         while True:
             is_collapsed, is_valid, currently_done = self.is_collapsed()
 
             if is_valid:
                 if self.animate:
                     self.progress_bar("Generating frames:", currently_done)
+                    # save animation frame
                     self.graphics(final=False)
                 else:
                     self.progress_bar("Generating image:", currently_done)
@@ -382,17 +451,19 @@ class WFC:
                 return False
             if is_collapsed:
                 break
-
+            # make one algorithm iteration
             self.iterate()
-
+        # save generated image
         self.graphics()
         if self.animate:
-            self.graphics(final=False)
-            self.make_animation()
+            # generate animation
+            self.generate_animation()
         return True
 
-    # calculate average color for a given cell
     def calculate_avg_color(self, cell: list[int]) -> tuple[np.array]:
+        """
+        Calculates average color among all tiles in a given cell
+        """
         avg_colors = []
         for tile_pos in cell:
             # calculate average color for every tile in the cell
@@ -401,6 +472,9 @@ class WFC:
         return tuple(np.array(avg_colors).mean(0).astype(int))
 
     def graphics(self, final=True) -> None:
+        """
+        Generates frame or final image for a WFC algorithm
+        """
         # variable to store image
         image = []
         # iterate over the whole grid
@@ -431,6 +505,7 @@ class WFC:
             self.frame += 1
         else:
             # if this is a final image (completely generated)
+            # calculate max index in images names in folder
             max_index = self.chose_max_index(GENERATED_IMAGES, "result_")
             # save generated image with new max integer in name
             filename = f"{GENERATED_IMAGES}/result_{max_index + 1}.png"
@@ -439,6 +514,13 @@ class WFC:
 
 
 def integer_input(title: str, min_: int, max_: int) -> int:
+    """
+    Prompts user to enter an integer in a given boundaries.
+
+    If input is invalid, user will see corresponding Error and will be prompted to enter an integer again.
+
+    If integer is valid, it returns from function.
+    """
     while True:
         try:
             integer = int(input(title))
@@ -452,6 +534,13 @@ def integer_input(title: str, min_: int, max_: int) -> int:
 
 
 def boolean_input(title: str) -> bool:
+    """
+    Prompts user to enter "y" or "n" which corresponds to True and False.
+
+    If input is invalid, user will see corresponding Error and will be prompted to enter again.
+
+    If input is valid, corresponds boolean returns from function.
+    """
     while True:
         boolean = input(title).lower()
         if boolean == "n":
@@ -513,7 +602,7 @@ def main():
     fps = 0
     if animate:
         fps = integer_input(
-            f"Input FPS for animation (~100 recommended) (min = {MIN_FPS}, max = {MAX_FPS}): ",
+            f"Input FPS for animation (~75 recommended) (min = {MIN_FPS}, max = {MAX_FPS}): ",
             MIN_FPS,
             MAX_FPS
         )
