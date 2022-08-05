@@ -20,7 +20,7 @@ MIN_TILE_SIZE, MAX_TILE_SIZE = 2, 100
 MIN_FIELD_WIDTH, MAX_FIELD_WIDTH = 2, 500
 MIN_FIELD_HEIGHT, MAX_FIELD_HEIGHT = MIN_FIELD_WIDTH, MAX_FIELD_WIDTH
 MIN_FPS, MAX_FPS = 1, 200
-NUMBER_OF_RETRIES = 100
+MIN_RETRIES, MAX_RETRIES = 1, 100
 
 
 # enum for directions
@@ -608,20 +608,24 @@ def main():
         )
 
     # input if algorithm should retry generating output if it wasn't able to
-    retry = boolean_input("Retry generation on fail [y, n]: ")
+    tries = integer_input(
+            f"Input number of tries for the algorithm to generate output (min = {MIN_RETRIES}, max = {MAX_RETRIES}): ",
+            MIN_FPS,
+            MAX_FPS
+        )
 
     counter = 1
     while True:
         # initialize WFC
         wfc = WFC(tile_set, use_weights, tile_size, width, height, animate, fps)
-        # run WFC algorithm
         start = time.perf_counter()
+        # run WFC algorithm
         if wfc.run():
             print(f"WFC finished successfully in {str(datetime.timedelta(seconds=int(time.perf_counter() - start)))}")
             break
         else:
             print("\nCouldn't generate an image from a given tile set")
-        if not retry or counter == NUMBER_OF_RETRIES:
+        if counter == tries:
             break
         else:
             counter += 1
