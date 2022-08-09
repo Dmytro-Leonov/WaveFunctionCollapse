@@ -67,7 +67,7 @@ def pars_tiles(tile_set: np.array, tile_size_px: int) -> list[np.array]:
     # validate tile size (width and height should be divisible by it)
     if width % tile_size_px or height % tile_size_px:
         raise ValueError(
-            f"Invalid tile size ({tile_size_px}) for tile set of given dimensions (width = {width}, height = {height})"
+            f"Invalid tile size '{tile_size_px}' for tile set of given dimensions [width = {width}, height = {height}]"
         )
     # list to store all parsed tiles
     tiles = []
