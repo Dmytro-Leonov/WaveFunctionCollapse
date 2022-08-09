@@ -1,7 +1,7 @@
 # How to set up and run project
 
 On Windows:
-1. Download `Python 3.10` or above
+1. Download and install `Python 3.10` or above
 2. Execute `setup.bat` once to create virtual environment and download all required libraries into it
 3. Execute `run.bat` to run project
    
