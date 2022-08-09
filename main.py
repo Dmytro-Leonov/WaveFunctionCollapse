@@ -558,11 +558,10 @@ def main():
     while True:
         # input tile size
         tile_size = integer_input(
-            f"Input tile size (min = {MIN_TILE_SIZE}, max = {MAX_TILE_SIZE}): ",
+            f"Input tile size [min = {MIN_TILE_SIZE}, max = {MAX_TILE_SIZE}]: ",
             MIN_TILE_SIZE,
             MAX_TILE_SIZE
-        )
-        # pars tiles with selected size
+        )        # pars tiles with selected size
         try:
             tiles = pars_tiles(tile_set, tile_size)
             break
@@ -583,14 +582,14 @@ def main():
 
     # input output image width
     width = integer_input(
-        f"Input width of the output image in tiles (min = {MIN_FIELD_WIDTH}, max = {MAX_FIELD_WIDTH}): ",
+        f"Input width of the output image in tiles [min = {MIN_FIELD_WIDTH}, max = {MAX_FIELD_WIDTH}]: ",
         MIN_FIELD_WIDTH,
         MAX_FIELD_WIDTH
     )
 
     # input output image height
     height = integer_input(
-        f"Input height of the output image in tiles (min = {MIN_FIELD_HEIGHT}, max = {MAX_FIELD_HEIGHT}): ",
+        f"Input height of the output image in tiles [min = {MIN_FIELD_HEIGHT}, max = {MAX_FIELD_HEIGHT}]: ",
         MIN_FIELD_HEIGHT,
         MAX_FIELD_HEIGHT
     )
@@ -602,16 +601,16 @@ def main():
     fps = 0
     if animate:
         fps = integer_input(
-            f"Input FPS for animation (~75 recommended) (min = {MIN_FPS}, max = {MAX_FPS}): ",
+            f"Input FPS for animation (~75 recommended) [min = {MIN_FPS}, max = {MAX_FPS}]: ",
             MIN_FPS,
             MAX_FPS
         )
 
     # input if algorithm should retry generating output if it wasn't able to
     tries = integer_input(
-            f"Input number of tries for the algorithm to generate output (min = {MIN_RETRIES}, max = {MAX_RETRIES}): ",
-            MIN_FPS,
-            MAX_FPS
+            f"Input number of tries for the algorithm to generate output [min = {MIN_RETRIES}, max = {MAX_RETRIES}]: ",
+            MIN_RETRIES,
+            MAX_RETRIES
         )
 
     counter = 1
